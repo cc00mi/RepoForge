@@ -152,7 +152,7 @@ def _print_step(event) -> None:
 )
 @click.pass_context
 def cli(ctx: click.Context, config: str | None) -> None:
-    """Coding Agent — autonomous code editing and bug fixing."""
+    """Repoforge — autonomous code editing and bug fixing."""
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
 
@@ -186,7 +186,7 @@ def run(
     sandbox: bool,
     verbose: bool,
 ) -> None:
-    """Run the coding agent on a repository."""
+    """Run Repoforge on a repository."""
     # 配置日志
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.WARNING,
@@ -215,7 +215,7 @@ def run(
         sys.exit(1)
 
     # 打印运行信息
-    click.echo(bold(f"\n🤖 Coding Agent"))
+    click.echo(bold(f"\n🤖 Repoforge"))
     click.echo(f"  Provider : {config.llm.provider}")
     click.echo(f"  Model    : {config.llm.model}")
     click.echo(f"  Repo     : {repo_path}")
@@ -379,7 +379,7 @@ def chat(
     )
 
     # 欢迎信息
-    click.echo(bold(f"\n🤖 Coding Agent — Chat Mode"))
+    click.echo(bold(f"\n🤖 Repoforge — Chat Mode"))
     click.echo(f"  Provider : {config.llm.provider}")
     click.echo(f"  Model    : {config.llm.model}")
     click.echo(f"  Repo     : {repo_path}")

@@ -1,0 +1,35 @@
+[
+  {
+    "instance_id": "astropy__astropy-12907",
+    "repo": "astropy/astropy",
+    "base_commit": "d16bfe05a744909de4b27f5875fe0d4ed41ce607",
+    "status": "completed",
+    "steps_taken": 10,
+    "tokens_used": 210225,
+    "elapsed_seconds": 84.27231812477112,
+    "error_message": "",
+    "summary": "Now let me run the existing tests for the modeling separability:\nAction: test\nParams: {\"path\": \"benchmark_repos/astropy__astropy/astropy/modeling/tests/test_separable.py\"}"
+  },
+  {
+    "instance_id": "astropy__astropy-14182",
+    "repo": "astropy/astropy",
+    "base_commit": "a5917978be39d13cd90b517e1de4e7a539ffaa48",
+    "status": "completed",
+    "steps_taken": 17,
+    "tokens_used": 416615,
+    "elapsed_seconds": 155.74102640151978,
+    "error_message": "",
+    "summary": "Let me check the core write method to understand the full flow:\n\nAction: file_view\nParams: {\"path\": \"benchmark_repos/astropy__astropy/astropy/io/ascii/core.py\", \"start_line\": 1535}"
+  },
+  {
+    "instance_id": "astropy__astropy-14365",
+    "repo": "astropy/astropy",
+    "base_commit": "7269fa3e33e8d02485a647da91a5a2a60a06af61",
+    "status": "completed",
+    "steps_taken": 8,
+    "tokens_used": 171058,
+    "elapsed_seconds": 81.85345268249512,
+    "error_message": "",
+    "summary": "Thought: (no thought)\nAction: shell\nParams: {\"cmd\": \"cd benchmark_repos/astropy__astropy && pip install -e . --no-build-isolation 2>&1 | tail -10\", \"timeout\": 120}"
+  }
+]

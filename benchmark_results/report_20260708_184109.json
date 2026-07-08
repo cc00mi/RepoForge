@@ -1,0 +1,43 @@
+{
+  "model_name": "deepseek/deepseek-v4-flash",
+  "total": 3,
+  "completed": 3,
+  "errored": 0,
+  "completion_rate": 1.0,
+  "patches_produced": 2,
+  "avg_steps": 11.7,
+  "avg_elapsed_seconds": 107.3,
+  "total_tokens": 797898,
+  "started_at": "2026-07-08 18:34:58",
+  "finished_at": "2026-07-08 18:41:09",
+  "predictions_file": "benchmark_results\\predictions_20260708_184109.jsonl",
+  "instances": [
+    {
+      "instance_id": "astropy__astropy-12907",
+      "repo": "astropy/astropy",
+      "status": "completed",
+      "steps_taken": 10,
+      "tokens_used": 210225,
+      "elapsed_seconds": 84.27231812477112,
+      "error_message": ""
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "repo": "astropy/astropy",
+      "status": "completed",
+      "steps_taken": 17,
+      "tokens_used": 416615,
+      "elapsed_seconds": 155.74102640151978,
+      "error_message": ""
+    },
+    {
+      "instance_id": "astropy__astropy-14365",
+      "repo": "astropy/astropy",
+      "status": "completed",
+      "steps_taken": 8,
+      "tokens_used": 171058,
+      "elapsed_seconds": 81.85345268249512,
+      "error_message": ""
+    }
+  ]
+}

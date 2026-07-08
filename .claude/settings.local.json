@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir E:agentProjectsforge-agent *)",
+      "Bash(npx ctx7@latest *)",
+      "WebSearch",
+      "PowerShell(New-Item *)",
+      "Bash(python *)",
+      "Bash(Select-Object -First 30)",
+      "PowerShell(python -m pytest tests/ -x -q --tb=short 2>&1 | Select-Object -First 40)",
+      "PowerShell(python -m pytest tests/ -q --tb=short -k \"not test_timeout\" 2>&1 | Select-Object -Last 15)",
+      "Bash(pip install *)",
+      "Bash(agent-benchmark *)",
+      "Bash(powershell *)",
+      "Bash(agent-pipeline --help)",
+      "Bash(agent-pipeline serve *)",
+      "Bash(agent-pipeline setup *)",
+      "Bash(agent-pipeline review *)",
+      "Bash(foo.py)",
+      "Bash(git diff *)",
+      "Read(//tmp/**)",
+      "Bash(docker build *)",
+      "Bash(docker run *)",
+      "Bash(Select-String -Pattern \"error|Error|ERROR|Successfully|DONE|naming|Module\")",
+      "Bash(repoforge-pipe *)",
+      "Bash(repoforge-bench *)",
+      "Bash(repoforge *)"
+    ]
+  }
+}

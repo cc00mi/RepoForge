@@ -72,7 +72,7 @@ def load_config(path: str = "config/default.yaml") -> dict:
         logger.error("Config file not found: %s", config_path)
         sys.exit(1)
 
-    with open(config_path) as f:
+    with open(config_path,encoding="utf-8") as f:
         raw = f.read()
 
     # 展开环境变量占位符 ${VAR}

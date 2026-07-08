@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "coding-agent"
+name = "repoforge"
 version = "0.1.0"
 description = "A general-purpose coding agent supporting Claude, OpenAI, DeepSeek, Groq and Ollama"
 requires-python = ">=3.11"
@@ -17,6 +17,8 @@ dependencies = [
     "tree-sitter-python>=0.22.0",
     "PyGithub>=2.3.0",
     "gitpython>=3.1.0",
+    "flask>=3.0.0",
+    "pyjwt>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -34,11 +36,13 @@ full = [
 ]
 
 [project.scripts]
-agent = "entry.cli:main"
+repoforge = "entry.cli:main"
+repoforge-bench = "benchmark.cli:main"
+repoforge-pipe = "pipeline.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agent*", "llm*", "tools*", "context*", "entry*", "config*"]
+include = ["agent*", "llm*", "tools*", "context*", "entry*", "config*", "benchmark*", "pipeline*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -196,7 +196,7 @@ class DockerRuntime(Runtime):
         self._setup_cmds = setup_cmds or []
         self._container_id: str | None = None
         # 容器名加随机后缀，避免冲突
-        self._container_name = f"coding-agent-sandbox-{uuid.uuid4().hex[:8]}"
+        self._container_name = f"repoforge-sandbox-{uuid.uuid4().hex[:8]}"
 
     @property
     def name(self) -> str:

@@ -1,0 +1,63 @@
+# ============================================================================
+# Repoforge — Docker Compose
+# ============================================================================
+# Usage:
+#   1. Set environment variables (or create .env file):
+#      cp .env.example .env
+#
+#   2. Start dashboard:
+#      docker compose up dashboard
+#
+#   3. Start webhook server:
+#      docker compose up server
+#
+#   4. Start both:
+#      docker compose up -d
+# ============================================================================
+
+version: "3.8"
+
+services:
+  server:
+    build: .
+    image: repoforge:latest
+    container_name: repoforge-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY:-}
+      - GITHUB_APP_PRIVATE_KEY_PATH=${GITHUB_APP_PRIVATE_KEY_PATH:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+    volumes:
+      - ./logs:/home/agent/app/logs
+      - ./pipeline_repos:/home/agent/app/pipeline_repos
+      - ./benchmark_results:/home/agent/app/benchmark_results
+      - ./config:/home/agent/app/config:ro
+    command: >
+      serve
+      --host 0.0.0.0
+      --port 8000
+      --config /home/agent/app/config/default.yaml
+
+  dashboard:
+    build: .
+    image: repoforge:latest
+    container_name: repoforge-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-8001}:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    volumes:
+      - ./logs:/home/agent/app/logs
+      - ./benchmark_results:/home/agent/app/benchmark_results
+      - ./config:/home/agent/app/config:ro
+    command: >
+      dashboard
+      --host 0.0.0.0
+      --port 8000
+      --config /home/agent/app/config/default.yaml

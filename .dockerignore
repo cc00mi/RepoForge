@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & runtime
+logs/
+pipeline_repos/
+benchmark_results/
+
+# Secrets
+*.pem
+*.key
+.env
+.env.local
+
+# Docs & notes
+*.md
+!readme_my.md
+
+# Tests
+tests/
