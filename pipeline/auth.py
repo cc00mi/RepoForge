@@ -11,6 +11,10 @@ GitHub App 有两层认证：
     auth = GitHubAppAuth(app_id="...", private_key_path="key.pem")
     token = auth.get_installation_token(installation_id=12345)
     # 用 token 操作 GitHub API
+
+注意：
+    建议通过 private_key_path 指定 PEM 文件路径，而不是直接将 PEM 内容
+    写在 .env 或环境变量中。多行 PEM 内容会使 python-dotenv 发出警告。
 """
 
 from __future__ import annotations
@@ -37,6 +41,13 @@ class GitHubAppAuth:
 
         if private_key:
             self._private_key = private_key
+            # 检查是否是多行 PEM 内容（来自环境变量 / .env），发出弃用警告
+            if "-----BEGIN" in private_key:
+                logger.warning(
+                    "Deprecated: Passing PEM content via GITHUB_APP_PRIVATE_KEY (or private_key "
+                    "argument) may trigger python-dotenv warnings. "
+                    "Use GITHUB_APP_PRIVATE_KEY_PATH / private_key_path to point to a .pem file instead."
+                )
         elif private_key_path:
             self._key_path = Path(private_key_path)
 
@@ -76,7 +87,7 @@ class GitHubAppAuth:
             return self._key_path.read_text(encoding="utf-8")
 
         raise ValueError(
-            "No private key provided. Set GITHUB_APP_PRIVATE_KEY "
+            "No private key provided. Set GITHUB_APP_PRIVATE_KEY_PATH "
             "environment variable or pass private_key_path."
         )
 
