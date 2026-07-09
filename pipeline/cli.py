@@ -33,7 +33,7 @@ def main() -> None:
 @click.option("--config", "-c", "config_path", default=None, help="配置 YAML 路径")
 @click.option("--webhook-secret", default=None, help="GitHub webhook secret")
 @click.option("--app-id", default=None, help="GitHub App ID")
-@click.option("--private-key-path", default=None, help="GitHub App 私钥路径")
+@click.option("--private-key-path", default=None, help="GitHub App 私钥文件路径（推荐，避免 .env 多行值警告）")
 @click.option("--debug", is_flag=True, help="Flask debug 模式")
 @click.option("--verbose", "-v", is_flag=True, help="详细日志")
 def serve(
@@ -53,9 +53,13 @@ def serve(
     \\b
     环境变量（与命令行参数等效）：
         GITHUB_APP_ID            — GitHub App ID
-        GITHUB_APP_PRIVATE_KEY   — 私钥内容（PEM 文本）
-        GITHUB_APP_PRIVATE_KEY_PATH — 私钥文件路径
+        GITHUB_APP_PRIVATE_KEY_PATH — 私钥文件路径（推荐，避免 .env 多行值警告）
         GITHUB_WEBHOOK_SECRET    — Webhook secret
+
+    \\b
+    注意：
+        建议通过文件路径指定私钥（GITHUB_APP_PRIVATE_KEY_PATH），
+        而不是将 PEM 内容直接写在 .env 中，以免 python-dotenv 发出警告。
 
     \\b
     示例：
@@ -90,8 +94,8 @@ def serve(
     if not _key and not _key_path:
         click.echo(
             "错误：需要 GitHub App 私钥。\n"
-            "  通过环境变量 GITHUB_APP_PRIVATE_KEY 设置 PEM 内容，\n"
-            "  或通过 GITHUB_APP_PRIVATE_KEY_PATH / --private-key-path 指定文件路径。",
+            "  推荐：通过 --private-key-path 或环境变量 GITHUB_APP_PRIVATE_KEY_PATH 指定 PEM 文件路径。\n"
+            "  也可通过环境变量 GITHUB_APP_PRIVATE_KEY 设置 PEM 内容（不推荐，可能触发 .env 警告）。",
             err=True,
         )
         sys.exit(1)
@@ -210,9 +214,13 @@ def setup() -> None:
 ║    在 App 设置页 "Install App" → 选择仓库                    ║
 ║                                                              ║
 ║  Step 5: 配置环境变量                                        ║
-║    export GITHUB_APP_ID=123456                                ║
-║    export GITHUB_APP_PRIVATE_KEY="$(cat your-key.pem)"        ║
-║    export GITHUB_WEBHOOK_SECRET=your_secret                   ║
+║    推荐方式（文件路径）：                                      ║
+║      将私钥 .pem 文件放在项目目录下（如 github-app.pem），      ║
+║      然后在 .env 中设置：                                     ║
+║        GITHUB_APP_PRIVATE_KEY_PATH=./github-app.pem           ║
+║                                                              ║
+║    备用方式（不推荐，可能触发 .env 多行值警告）：               ║
+║      export GITHUB_APP_PRIVATE_KEY="$(cat your-key.pem)"      ║
 ║                                                              ║
 ║  Step 6: 启动 server                                         ║
 ║    repoforge-pipe serve --port 8000                            ║

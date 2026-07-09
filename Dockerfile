@@ -10,12 +10,17 @@
 #     repoforge dashboard
 #
 # Run (Webhook server):
-#   docker run -p 8000:8000 \
-#     -e DEEPSEEK_API_KEY=sk-xxx \
-#     -e GITHUB_APP_ID=123456 \
+#   Mount private key file and use GITHUB_APP_PRIVATE_KEY_PATH:
+#     docker run -p 8000:8000 \
+#       -e DEEPSEEK_API_KEY=sk-xxx \
+#       -e GITHUB_APP_ID=123456 \
+#       -e GITHUB_APP_PRIVATE_KEY_PATH=/app/github-app.pem \
+#       -v /path/to/github-app.pem:/app/github-app.pem:ro \
+#       -e GITHUB_WEBHOOK_SECRET=secret \
+#       repoforge serve
+#
+#   Alternatively (not recommended, may trigger .env warnings):
 #     -e GITHUB_APP_PRIVATE_KEY="$(cat key.pem)" \
-#     -e GITHUB_WEBHOOK_SECRET=secret \
-#     repoforge serve
 # ============================================================================
 
 FROM python:3.11-slim
