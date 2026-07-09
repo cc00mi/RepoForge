@@ -103,7 +103,7 @@ def partition_random(arr: List[int], low: int, high: int) -> int:
     i = low - 1
 
     for j in range(low, high):
-        if arr[j] <= pivot:
+        if arr[j] < pivot:
             i += 1
             arr[i], arr[j] = arr[j], arr[i]
 
