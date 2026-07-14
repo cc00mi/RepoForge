@@ -93,6 +93,20 @@ class LLMBackend(ABC):
         """
         ...
 
+    def complete_text(
+        self,
+        messages: list[LLMMessage],
+    ) -> str:
+        """
+        Raw text completion — no tools, no Action parsing.
+        Used by the context compressor and other internal utilities.
+
+        Default: calls complete() with no tools and returns raw_content.
+        Backends that want to optimise this path can override.
+        """
+        response = self.complete(messages, tools=[])
+        return response.raw_content
+
     @property
     @abstractmethod
     def model_name(self) -> str:
@@ -191,6 +205,15 @@ class MockBackend(LLMBackend):
             raw_content=f"[mock] {action!r}",
             input_tokens=self._input_tokens,
             output_tokens=self._output_tokens,
+        )
+
+    def complete_text(self, messages: list[LLMMessage]) -> str:
+        """Text-only completion — returns mock compression JSON."""
+        return (
+            '{"summary": "Mock compression summary.", '
+            '"files_examined": [], "files_modified": [], '
+            '"test_results": "", "key_findings": [], '
+            '"current_state": "agent was exploring"}'
         )
 
     def reset(self) -> None:

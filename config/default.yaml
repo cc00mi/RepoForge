@@ -1,6 +1,6 @@
 llm:
   provider: deepseek
-  model: deepseek-v4-flash # 或 deepseek-v4-pro
+  model: deepseek-v4-pro
   api_key: ${DEEPSEEK_API_KEY} # 在终端 export DEEPSEEK_API_KEY=你的key
   base_url: https://api.deepseek.com
   max_tokens: 8192
@@ -20,3 +20,33 @@ tools:
 context:
   repo_map_budget: 8000 # repo-map 最大 token 数
   history_window: 20 # 保留最近 N 轮对话
+
+pipeline:
+  understand:
+    max_steps: 8
+    token_budget: 6000
+  plan:
+    max_steps: 5
+    token_budget: 4000
+  implement:
+    max_steps: 12
+    token_budget: 15000
+  verify:
+    max_steps: 3
+    token_budget: 3000
+
+memory:
+  repo_dir: ./memory_data
+  max_file_signals: 50
+  max_outcomes: 100
+
+# 后台调度器（周期性维护任务）
+scheduler:
+  enabled: false
+  # installation_id: 12345678  # GitHub App installation ID
+  # monitored_repos:           # 要监控的仓库列表
+  #   - owner/repo1
+  #   - owner/repo2
+  scout_interval_hours: 6.0
+  stale_interval_hours: 24.0
+  security_interval_hours: 4.0

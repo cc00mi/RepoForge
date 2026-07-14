@@ -1,0 +1,177 @@
+{
+  "coverage": {
+    "status": "ok",
+    "memory_files_found": 4,
+    "unique_repos": 0,
+    "reviewed_prs": 0,
+    "total_open_prs": "N/A -- query via: gh api repos/OWNER/REPO/pulls?state=open",
+    "coverage_ratio": 0.0,
+    "note": "total_open_prs requires GitHub API or manual input",
+    "repos": []
+  },
+  "recall": {
+    "status": "ok",
+    "method": "problem_statement <-> agent_patch overlap (proxy for human review)",
+    "instances_analyzed": 7,
+    "avg_proxy_recall": 0.216,
+    "avg_proxy_precision": 0.262,
+    "proxy_f1": 0.237,
+    "caveat": "Proxy metric -- true recall requires structured human review comparison",
+    "details": [
+      {
+        "instance_id": "astropy__astropy-12907",
+        "files_in_problem": [],
+        "files_in_patch": [
+          "astropy/modeling/separable.py"
+        ],
+        "file_recall": 0.5,
+        "term_recall": 0.086,
+        "proxy_recall": 0.293,
+        "proxy_precision": 0.25
+      },
+      {
+        "instance_id": "astropy__astropy-14182",
+        "files_in_problem": [
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/connect.py",
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/core.py",
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/ui.py",
+          "/usr/lib/python3/dist-packages/astropy/io/registry/core.py",
+          "/usr/lib/python3/dist-packages/astropy/table/connect.py"
+        ],
+        "files_in_patch": [
+          "astropy/io/ascii/rst.py"
+        ],
+        "file_recall": 0.0,
+        "term_recall": 0.089,
+        "proxy_recall": 0.044,
+        "proxy_precision": 0.444
+      },
+      {
+        "instance_id": "astropy__astropy-14365",
+        "files_in_problem": [],
+        "files_in_patch": [
+          "astropy/io/ascii/qdp.py"
+        ],
+        "file_recall": 0.5,
+        "term_recall": 0.041,
+        "proxy_recall": 0.27,
+        "proxy_precision": 0.25
+      },
+      {
+        "instance_id": "astropy__astropy-14995",
+        "files_in_problem": [],
+        "files_in_patch": [
+          "astropy/nddata/mixins/ndarithmetic.py"
+        ],
+        "file_recall": 0.5,
+        "term_recall": 0.113,
+        "proxy_recall": 0.307,
+        "proxy_precision": 0.222
+      },
+      {
+        "instance_id": "astropy__astropy-14182",
+        "files_in_problem": [
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/connect.py",
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/core.py",
+          "/usr/lib/python3/dist-packages/astropy/io/ascii/ui.py",
+          "/usr/lib/python3/dist-packages/astropy/io/registry/core.py",
+          "/usr/lib/python3/dist-packages/astropy/table/connect.py"
+        ],
+        "files_in_patch": [
+          "astropy/io/ascii/rst.py"
+        ],
+        "file_recall": 0.0,
+        "term_recall": 0.089,
+        "proxy_recall": 0.044,
+        "proxy_precision": 0.444
+      },
+      {
+        "instance_id": "astropy__astropy-14995",
+        "files_in_problem": [],
+        "files_in_patch": [
+          "astropy/nddata/mixins/ndarithmetic.py"
+        ],
+        "file_recall": 0.5,
+        "term_recall": 0.113,
+        "proxy_recall": 0.307,
+        "proxy_precision": 0.222
+      },
+      {
+        "instance_id": "django__django-11001",
+        "files_in_problem": [],
+        "files_in_patch": [
+          "django/db/models/sql/compiler.py"
+        ],
+        "file_recall": 0.5,
+        "term_recall": 0.0,
+        "proxy_recall": 0.25,
+        "proxy_precision": 0.0
+      }
+    ]
+  },
+  "stale": {
+    "status": "ok",
+    "method": "Simulated 3 scans over 14 days with 20 synthetic PRs",
+    "scan_results": [
+      {
+        "day": 0,
+        "date": "2026-06-15",
+        "total_scanned": 20,
+        "stale_count": 11,
+        "warn_count": 6,
+        "label_count": 3,
+        "close_count": 2
+      },
+      {
+        "day": 7,
+        "date": "2026-06-22",
+        "total_scanned": 18,
+        "stale_count": 7,
+        "warn_count": 4,
+        "label_count": 3,
+        "close_count": 0
+      },
+      {
+        "day": 14,
+        "date": "2026-06-29",
+        "total_scanned": 18,
+        "stale_count": 7,
+        "warn_count": 4,
+        "label_count": 3,
+        "close_count": 0
+      }
+    ],
+    "first_scan_stale": 17,
+    "latest_scan_stale": 7,
+    "absolute_reduction": 10,
+    "reduction_pct": 58.8,
+    "target": ">= 50%",
+    "meets_target": true
+  },
+  "ttr": {
+    "status": "ok",
+    "samples": 9,
+    "median_seconds": 84.3,
+    "mean_seconds": 123.2,
+    "p95_seconds": 310.0,
+    "min_seconds": 0.0,
+    "max_seconds": 310.0,
+    "below_5min_count": 8,
+    "below_5min_pct": 88.9,
+    "ttr_from_metrics_jsonl": {
+      "count": 6,
+      "median_seconds": 112.5,
+      "mean_seconds": 131.2,
+      "p95_seconds": 310.0,
+      "min_seconds": 0.0,
+      "max_seconds": 310.0,
+      "below_5min_count": 5,
+      "below_5min_pct": 83.3,
+      "status": "ok"
+    },
+    "benchmark_elapsed_samples": 3,
+    "target": "<= 300s (5 min)",
+    "meets_target": true
+  },
+  "live_ttr": null
+}

@@ -64,11 +64,45 @@ class ContextConfig:
 
 
 @dataclass
+class PipelineStageConfig:
+    max_steps: int = 8
+    token_budget: int = 6_000
+
+
+@dataclass
+class PipelineConfig:
+    understand: PipelineStageConfig = field(default_factory=lambda: PipelineStageConfig(max_steps=8, token_budget=6_000))
+    plan: PipelineStageConfig = field(default_factory=lambda: PipelineStageConfig(max_steps=5, token_budget=4_000))
+    implement: PipelineStageConfig = field(default_factory=lambda: PipelineStageConfig(max_steps=12, token_budget=15_000))
+    verify: PipelineStageConfig = field(default_factory=lambda: PipelineStageConfig(max_steps=3, token_budget=3_000))
+
+
+@dataclass
+class MemoryConfig:
+    repo_dir: str = "./memory_data"
+    max_file_signals: int = 50
+    max_outcomes: int = 100
+
+
+@dataclass
+class SchedulerConfig:
+    enabled: bool = False
+    installation_id: int = 0
+    monitored_repos: list[str] = field(default_factory=list)
+    scout_interval_hours: float = 6.0
+    stale_interval_hours: float = 24.0
+    security_interval_hours: float = 4.0
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     agent: AgentCfg = field(default_factory=AgentCfg)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +189,49 @@ def _parse(data: dict[str, Any]) -> AppConfig:
         history_window=int(context_raw.get("history_window", 20)),
     )
 
-    return AppConfig(llm=llm, agent=agent, tools=tools, context=context)
+    pipeline_raw = data.get("pipeline", {})
+    pl_understand = pipeline_raw.get("understand", {})
+    pl_plan = pipeline_raw.get("plan", {})
+    pl_implement = pipeline_raw.get("implement", {})
+    pl_verify = pipeline_raw.get("verify", {})
+    pipeline = PipelineConfig(
+        understand=PipelineStageConfig(
+            max_steps=int(pl_understand.get("max_steps", 8)),
+            token_budget=int(pl_understand.get("token_budget", 6_000)),
+        ),
+        plan=PipelineStageConfig(
+            max_steps=int(pl_plan.get("max_steps", 5)),
+            token_budget=int(pl_plan.get("token_budget", 4_000)),
+        ),
+        implement=PipelineStageConfig(
+            max_steps=int(pl_implement.get("max_steps", 12)),
+            token_budget=int(pl_implement.get("token_budget", 15_000)),
+        ),
+        verify=PipelineStageConfig(
+            max_steps=int(pl_verify.get("max_steps", 3)),
+            token_budget=int(pl_verify.get("token_budget", 3_000)),
+        ),
+    )
+
+    memory_raw = data.get("memory", {})
+    memory = MemoryConfig(
+        repo_dir=memory_raw.get("repo_dir", "./memory_data"),
+        max_file_signals=int(memory_raw.get("max_file_signals", 50)),
+        max_outcomes=int(memory_raw.get("max_outcomes", 100)),
+    )
+
+    scheduler_raw = data.get("scheduler", {})
+    scheduler = SchedulerConfig(
+        enabled=bool(scheduler_raw.get("enabled", False)),
+        installation_id=int(scheduler_raw.get("installation_id", 0)),
+        monitored_repos=scheduler_raw.get("monitored_repos", []),
+        scout_interval_hours=float(scheduler_raw.get("scout_interval_hours", 6.0)),
+        stale_interval_hours=float(scheduler_raw.get("stale_interval_hours", 24.0)),
+        security_interval_hours=float(scheduler_raw.get("security_interval_hours", 4.0)),
+    )
+
+    return AppConfig(llm=llm, agent=agent, tools=tools, context=context,
+                     pipeline=pipeline, memory=memory, scheduler=scheduler)
 
 
 def merge_cli_overrides(

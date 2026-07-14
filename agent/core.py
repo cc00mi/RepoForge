@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass
 
 from agent.event_log import EventLog
+from context.compressor import ContextCompressor
 from context.history import ConversationHistory
 from context.repo_map import RepoMap
 from context.token_budget import TokenBudget
@@ -62,6 +63,9 @@ class AgentConfig:
     thought_callback: object = None        # StreamCallback，推理过程流式回调（推理模型专用）
     confirm_dangerous: bool = False        # 是否对危险命令要求用户确认
     confirm_callback: object = None        # ConfirmCallback，None=跳过确认
+    checkpoint_interval: int = 0           # 每 N 步保存一次 checkpoint（0=禁用）
+    checkpoint_dir: str = "./checkpoints"  # checkpoint 文件存放目录
+    system_prompt_template: str | None = None  # 自定义 system prompt 模板（None=使用默认）
 
 
 
@@ -87,23 +91,32 @@ class Agent:
         self._backend = backend
         self._registry = registry
         self._cfg = config or AgentConfig()
+        self._compressor = ContextCompressor(backend)
 
     # ------------------------------------------------------------------
     # 公开接口
     # ------------------------------------------------------------------
 
-    def run(self, task: Task, log: EventLog) -> RunResult:
+    def run(self, task: Task, log: EventLog,
+            repo_memory_text: str = "",
+            resume_from: "Checkpoint | None" = None) -> RunResult:
         """
         执行一次完整的 agent 运行。
 
         Args:
-            task: 任务描述
-            log:  已初始化的 EventLog（由调用方创建并传入）
+            task:   任务描述
+            log:    已初始化的 EventLog（由调用方创建并传入）
+            repo_memory_text: Repo Memory 自然语言摘要（供 prompt 注入）
+            resume_from: 可选的 Checkpoint，从指定检查点恢复执行
 
         Returns:
             RunResult，包含最终状态和统计信息
         """
+        from agent.checkpoint import Checkpoint, CheckpointManager
+
         self._current_repo_path = task.repo_path
+        self._current_task_description = task.description
+        self._repo_memory_text = repo_memory_text
         # 按 repo_path 隔离 repo_map 缓存，换 repo 时自动重建
         cache_key = task.repo_path
         if getattr(self, "_repo_map_cache_key", None) != cache_key:
@@ -111,28 +124,36 @@ class Agent:
                 del self._repo_map_cache
             self._repo_map_cache_key = cache_key
         log.log_task_start(task)
-        logger.info("Agent starting task %s", task.task_id)
 
         # 初始化上下文管理器
-        # 如果调用方（ChatSession）注入了共享 history，直接复用；
-        # 否则新建（单次 run 模式）
-        if hasattr(self, "_pending_history") and self._pending_history is not None:
+        start_step = 1
+        total_tokens = 0
+        steps_without_edit = 0
+
+        if resume_from is not None:
+            history = ConversationHistory.from_dicts(
+                resume_from.history_dicts,
+                max_messages=self._cfg.history_max_messages,
+            )
+            start_step = resume_from.step + 1
+            total_tokens = resume_from.total_tokens
+            steps_without_edit = resume_from.steps_without_edit
+            logger.info("Agent resuming task %s from step %d", task.task_id, start_step)
+        elif hasattr(self, "_pending_history") and self._pending_history is not None:
             history = self._pending_history
         else:
             history = ConversationHistory(max_messages=self._cfg.history_max_messages)
-            # 单次模式：把任务描述作为第一条 user 消息
             from agent.prompt import build_task_prompt
             history.add(LLMMessage(
                 role="user",
                 content=build_task_prompt(task.description, task.repo_path, task.issue_url),
             ))
+
         token_budget = TokenBudget(total=self._cfg.budget_tokens)
         repo_map = RepoMap(task.repo_path)
+        ck_manager = CheckpointManager(self._cfg.checkpoint_dir) if self._cfg.checkpoint_interval > 0 else None
 
-        total_tokens = 0
-        steps_without_edit = 0
-
-        for step in range(1, task.max_steps + 1):
+        for step in range(start_step, task.max_steps + 1):
             logger.debug("Step %d/%d", step, task.max_steps)
 
             # ── 1. 组装 messages，调用 LLM ──────────────────────────────
@@ -177,6 +198,7 @@ class Agent:
             if action.action_type == ActionType.FINISH:
                 summary = action.message or "Task complete."
                 patch = self._get_git_diff(task.repo_path)
+                changed = self._get_changed_files(task.repo_path)
                 log.log_task_complete(steps=step, summary=summary)
                 return RunResult(
                     task_id=task.task_id,
@@ -185,10 +207,13 @@ class Agent:
                     steps_taken=step,
                     total_tokens=total_tokens,
                     patch=patch,
+                    changed_files=changed,
                 )
 
             if action.action_type == ActionType.GIVE_UP:
                 reason = action.message or "Agent gave up."
+                patch = self._get_git_diff(task.repo_path)
+                changed = self._get_changed_files(task.repo_path)
                 log.log_task_failed(steps=step, reason=reason)
                 return RunResult(
                     task_id=task.task_id,
@@ -196,6 +221,8 @@ class Agent:
                     summary=reason,
                     steps_taken=step,
                     total_tokens=total_tokens,
+                    patch=patch,
+                    changed_files=changed,
                 )
 
             # ── 5. 执行工具 ─────────────────────────────────────────────
@@ -250,6 +277,23 @@ class Agent:
                     steps_without_edit = 0  # 重置计数，避免每步都触发
                     logger.debug("Reflection triggered: no_edit at step %d", step)
 
+                # ── Checkpoint save ──────────────────────────────────
+                if ck_manager and step % self._cfg.checkpoint_interval == 0:
+                    try:
+                        ck = Checkpoint.from_agent(
+                            task=task,
+                            history_dicts=history.to_dicts(),
+                            step=step,
+                            total_tokens=total_tokens,
+                            repo_path=task.repo_path,
+                            steps_without_edit=steps_without_edit,
+                            patch=self._get_git_diff(task.repo_path),
+                            changed_files=self._get_changed_files(task.repo_path),
+                        )
+                        ck_manager.save(ck)
+                    except Exception:
+                        logger.debug("Checkpoint save failed", exc_info=True)
+
             elif action.action_type == ActionType.REFLECTION:
                 # LLM 主动要求 reflection（预留，当前 MockBackend 不产生）
                 history.add(LLMMessage(
@@ -286,18 +330,27 @@ class Agent:
         # 生成 repo-map（带缓存：只在第一步生成，之后复用）
         if not hasattr(self, "_repo_map_cache"):
             self._repo_map_cache = repo_map.build(
-                budget=token_budget.default_plan().repo_map
+                budget=token_budget.default_plan().history
             )
 
         system_content = build_system_prompt(
             repo_path=getattr(self, "_current_repo_path", "."),
             tools=schemas,
             repo_summary=self._repo_map_cache,
+            repo_memory_text=getattr(self, "_repo_memory_text", ""),
+            template=self._cfg.system_prompt_template,
+        )
+
+        # Compress old messages before trimming — preserves semantics
+        history_dicts = history.to_dicts()
+        history_dicts = self._compressor.compress(
+            history_dicts,
+            task_description=getattr(self, "_current_task_description", ""),
         )
 
         # 裁剪历史
         trimmed_history_dicts = token_budget.trim_history(
-            history.to_dicts(),
+            history_dicts,
             token_budget.default_plan().history,
         )
 
@@ -407,3 +460,16 @@ class Agent:
             return diff if diff else None
         except Exception:
             return None
+
+    def _get_changed_files(self, repo_path: str) -> list[str]:
+        """获取自 HEAD 以来修改过的文件路径列表。"""
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["git", "diff", "--name-only", "HEAD"],
+                capture_output=True, text=True, timeout=10, cwd=repo_path,
+            )
+            lines = proc.stdout.strip().split("\n")
+            return [l.strip() for l in lines if l.strip()]
+        except Exception:
+            return []

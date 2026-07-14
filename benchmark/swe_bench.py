@@ -64,6 +64,7 @@ class BenchmarkRun:
     model_name: str = ""
     started_at: str = ""
     finished_at: str = ""
+    evaluation_report: dict | None = None  # populated when --evaluate is used
 
     @property
     def total(self) -> int:
@@ -82,6 +83,18 @@ class BenchmarkRun:
         if self.total == 0:
             return 0.0
         return self.completed / self.total
+
+    @property
+    def resolved(self) -> int:
+        if self.evaluation_report:
+            return self.evaluation_report.get("resolved", 0)
+        return 0
+
+    @property
+    def resolved_rate(self) -> float:
+        if self.total == 0:
+            return 0.0
+        return self.resolved / self.total
 
     @property
     def avg_steps(self) -> float:
@@ -105,19 +118,22 @@ class BenchmarkRun:
         return sum(1 for r in self.results if r.patch.strip())
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "model_name": self.model_name,
             "total": self.total,
             "completed": self.completed,
             "errored": self.errored,
             "completion_rate": round(self.completion_rate, 4),
             "patches_produced": self.patches_produced,
+            "resolved": self.resolved,
+            "resolved_rate": round(self.resolved_rate, 4),
             "avg_steps": round(self.avg_steps, 1),
             "avg_elapsed_seconds": round(self.avg_elapsed, 1),
             "total_tokens": self.total_tokens,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
+        return d
 
     def print_summary(self) -> None:
         """终端友好的汇总输出。"""
@@ -129,14 +145,19 @@ class BenchmarkRun:
         print(f"  Completed      : {self.completed} ({self.completion_rate:.0%})")
         print(f"  Errored        : {self.errored}")
         print(f"  Patches        : {self.patches_produced}")
+        print(f"  Resolved       : {self.resolved} ({self.resolved_rate:.1%})")
         print(f"  Avg steps      : {self.avg_steps:.1f}")
         print(f"  Avg time       : {self.avg_elapsed:.0f}s")
         print(f"  Total tokens   : {self.total_tokens:,}")
         print(f"  Started        : {self.started_at}")
         print(f"  Finished       : {self.finished_at}")
         print("=" * 60)
-        print()
-        print("  注意：以上 'completed' 指 agent 自己报告完成任务。")
+        if self.evaluation_report:
+            print()
+            print("  SWE-bench evaluation complete. Resolved rate reflects test-pass rate.")
+        else:
+            print()
+            print("  注意：以上 'completed' 指 agent 自己报告完成任务。")
         print("  正式评测需要运行 SWE-bench evaluation harness 做测试验证。")
         print("  生成 predictions 文件后执行：")
         print("    python -m swebench.harness.run_evaluation \\")
@@ -284,11 +305,33 @@ def _build_task_description(instance: dict) -> str:
     return "\n".join(parts)
 
 
+def _record_benchmark_outcome(
+    svc, repo_memory, *, instance_id, instance_title,
+    changed_files, patch_produced, validation_summary,
+):
+    """Persist benchmark result into Repo Memory (best-effort, never throw)."""
+    try:
+        svc.record_outcome(
+            repo_memory,
+            issue_ref=instance_id,
+            issue_title=instance_title,
+            changed_files=changed_files,
+            patch_produced=patch_produced,
+            validation_passed=False,
+            validation_summary=validation_summary,
+        )
+        svc.save(repo_memory)
+    except Exception:
+        pass
+
+
 def run_single_instance(
     instance: dict,
     repos_dir: Path,
     backend,
     config,
+    *,
+    use_pipeline: bool = False,
 ) -> BenchmarkResult:
     """
     对单个 SWE-bench instance 运行 Repoforge。
@@ -298,6 +341,7 @@ def run_single_instance(
         repos_dir: 仓库缓存目录
         backend: LLMBackend 实例
         config: AppConfig 实例
+        use_pipeline: True = 四阶段流水线，False = 标准 ReAct
 
     Returns:
         BenchmarkResult
@@ -322,15 +366,13 @@ def run_single_instance(
             error_message=f"repo setup: {e}",
         )
 
-    # 2. 构建 agent
-    registry = _build_registry(config)
-    agent_cfg = AgentConfig(
-        max_steps=config.agent.max_steps,
-        budget_tokens=config.agent.budget_tokens,
-        stream=False,
-    )
-    agent = Agent(backend, registry, agent_cfg)
+    # 2. 加载 Repo Memory
+    from memory.repo_memory import memory_service
+    repo_memory = memory_service.load(repo_name)
+    repo_memory_text = memory_service.render_for_prompt(repo_memory)
 
+    # 3. 构建 agent
+    registry = _build_registry(config)
     task = Task(
         description=_build_task_description(instance),
         repo_path=str(repo_dir),
@@ -339,29 +381,74 @@ def run_single_instance(
         budget_tokens=config.agent.budget_tokens,
     )
 
-    # 3. 运行 agent
+    # 4. 运行 agent（流水线 或 标准 ReAct）
     t0 = time.time()
     log_dir = os.path.join(config.agent.log_dir, "benchmark")
     try:
-        with EventLog.create(task, log_dir=log_dir) as log:
-            result = agent.run(task, log)
-        elapsed = time.time() - t0
-        patch = _get_patch(repo_dir, base_commit)
+        if use_pipeline:
+            from agent.pipeline import PipelineEngine
+            engine = PipelineEngine(backend, registry, config)
+            with EventLog.create(task, log_dir=log_dir) as log:
+                result = engine.run(task, log, repo_memory_text=repo_memory_text)
+            elapsed = result.elapsed_seconds
+            patch = result.patch or _get_patch(repo_dir, base_commit)
+            is_success = result.status.value in ("success", "completed")
+            steps = result.steps_taken
+            tokens = result.total_tokens
+            summary = result.summary
+            changed_files = result.changed_files
+        else:
+            agent_cfg = AgentConfig(
+                max_steps=config.agent.max_steps,
+                budget_tokens=config.agent.budget_tokens,
+                stream=False,
+            )
+            agent = Agent(backend, registry, agent_cfg)
+            with EventLog.create(task, log_dir=log_dir) as log:
+                result = agent.run(task, log, repo_memory_text=repo_memory_text)
+            elapsed = time.time() - t0
+            patch = _get_patch(repo_dir, base_commit)
+            is_success = result.is_success()
+            steps = result.steps_taken
+            tokens = result.total_tokens
+            summary = result.summary or ""
+            changed_files = result.changed_files
+
+        # 5. 记录结果到 Repo Memory
+        _record_benchmark_outcome(
+            memory_service, repo_memory,
+            instance_id=instance_id,
+            instance_title=instance.get("problem_statement", "")[:100],
+            changed_files=changed_files,
+            patch_produced=bool(patch.strip()),
+            validation_summary=summary,
+        )
 
         return BenchmarkResult(
             instance_id=instance_id,
             repo=repo_name,
             base_commit=base_commit,
-            status="completed" if result.is_success() else "failed",
-            steps_taken=result.steps_taken,
-            tokens_used=result.total_tokens,
+            status="completed" if is_success else "failed",
+            steps_taken=steps,
+            tokens_used=tokens,
             elapsed_seconds=elapsed,
             patch=patch,
-            summary=result.summary or "",
+            summary=summary,
         )
     except Exception as e:
         elapsed = time.time() - t0
         logger.exception("Error running instance %s", instance_id)
+        try:
+            _record_benchmark_outcome(
+                memory_service, repo_memory,
+                instance_id=instance_id,
+                instance_title=instance.get("problem_statement", "")[:100],
+                changed_files=[],
+                patch_produced=False,
+                validation_summary=str(e)[:200],
+            )
+        except Exception:
+            pass
         return BenchmarkResult(
             instance_id=instance_id,
             repo=repo_name,
@@ -371,6 +458,75 @@ def run_single_instance(
             elapsed_seconds=elapsed,
             error_message=str(e),
         )
+
+
+def _run_swebench_evaluation(predictions_path: Path, run_id: str,
+                              max_workers: int = 4, timeout: int = 900) -> dict | None:
+    """Run the official SWE-bench evaluation harness and return resolved counts.
+
+    Requires: ``pip install swebench`` and Docker.
+    Returns None if evaluation is not possible (missing harness, Docker unavailable).
+    """
+    import subprocess as _sp
+
+    eval_log_dir = predictions_path.parent / "eval"
+    eval_log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = eval_log_dir / f"{run_id}.log"
+
+    try:
+        _sp.run(
+            [sys.executable, "-c", "import swebench.harness.run_evaluation"],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        logger.warning("swebench package not installed — skipping evaluation")
+        print("  Warning: swebench not installed. Install with: pip install swebench")
+        return None
+
+    cmd = [
+        sys.executable, "-m", "swebench.harness.run_evaluation",
+        "--dataset_name", "princeton-nlp/SWE-bench_Lite",
+        "--predictions_path", str(predictions_path),
+        "--max_workers", str(max_workers),
+        "--run_id", run_id,
+        "--timeout", str(timeout),
+    ]
+
+    print(f"\n  Running SWE-bench evaluation (max_workers={max_workers}, timeout={timeout}s)...")
+    print(f"  Log: {log_file}")
+
+    try:
+        with open(log_file, "w") as f:
+            proc = _sp.run(cmd, stdout=f, stderr=_sp.STDOUT, timeout=7200)
+    except _sp.TimeoutExpired:
+        logger.warning("SWE-bench evaluation timed out after 2 hours")
+        return None
+    except Exception as exc:
+        logger.warning("SWE-bench evaluation failed: %s", exc)
+        return None
+
+    if proc.returncode != 0:
+        logger.warning("SWE-bench evaluation exited with code %d", proc.returncode)
+        return None
+
+    result_dir = Path("logs/run_evaluation") / run_id
+    report_path = result_dir / "report.json"
+    if not report_path.exists():
+        alt_path = Path.cwd() / "logs" / "run_evaluation" / run_id / "report.json"
+        if alt_path.exists():
+            report_path = alt_path
+
+    if report_path.exists():
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+            resolved = data.get("resolved", 0)
+            total = data.get("total", len(data.get("resolved_ids", [])))
+            print(f"  Evaluation result: {resolved}/{total} resolved")
+            return {"resolved": resolved, "total": total, "report_path": str(report_path)}
+        except Exception:
+            logger.debug("Failed to parse evaluation report", exc_info=True)
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -443,6 +599,8 @@ def run_benchmark(
     repos_dir: str | Path = "./benchmark_repos",
     output_dir: str | Path = "./benchmark_results",
     resume: bool = True,
+    use_pipeline: bool = False,
+    evaluate: bool = False,
 ) -> BenchmarkRun:
     """
     批量执行 SWE-bench-lite benchmark。
@@ -529,9 +687,14 @@ def run_benchmark(
     for idx, instance in enumerate(pending):
         iid = instance["instance_id"]
         print(f"\n[{idx + 1}/{total_pending}] {iid}  ({instance['repo']})")
-        print(f"  issue: {instance['problem_statement'][:120]}...")
+        try:
+            print(f"  issue: {instance['problem_statement'][:120]}...")
+        except UnicodeEncodeError:
+            desc = instance['problem_statement'][:120].encode("gbk", errors="replace").decode("gbk")
+            print(f"  issue: {desc}...")
 
-        result = run_single_instance(instance, repos_dir, backend, config)
+        result = run_single_instance(instance, repos_dir, backend, config,
+                                      use_pipeline=use_pipeline)
         results.append(result)
 
         status_icon = {"completed": "+", "failed": "-", "error": "!"}.get(result.status, "?")
@@ -548,6 +711,10 @@ def run_benchmark(
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     pred_path = output_dir / f"predictions_{ts}.jsonl"
     save_predictions(results, pred_path, model_name)
+
+    # 可选：运行 SWE-bench 官方评测
+    if evaluate:
+        run.evaluation_report = _run_swebench_evaluation(pred_path, f"repoforge_{ts}")
 
     # 保存完整报告
     report_path = output_dir / f"report_{ts}.json"

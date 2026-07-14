@@ -35,6 +35,8 @@ def main() -> None:
 @click.option("--config", "-c", "config_path", default=None, help="配置 YAML 路径")
 @click.option("--model", "-m", default=None, help="模型名（覆盖配置文件）")
 @click.option("--no-resume", is_flag=True, help="禁用断点续跑")
+@click.option("--use-pipeline", is_flag=True, help="使用四阶段流水线引擎")
+@click.option("--evaluate", is_flag=True, help="跑完后自动调用 SWE-bench evaluation harness")
 @click.option("--verbose", "-v", is_flag=True, help="详细日志")
 def run(
     limit: int | None,
@@ -44,6 +46,8 @@ def run(
     config_path: str | None,
     model: str | None,
     no_resume: bool,
+    use_pipeline: bool,
+    evaluate: bool,
     verbose: bool,
 ) -> None:
     """运行 SWE-bench Lite benchmark。
@@ -82,6 +86,8 @@ def run(
         repos_dir=repos_dir,
         output_dir=output_dir,
         resume=not no_resume,
+        use_pipeline=use_pipeline,
+        evaluate=evaluate,
     )
 
     run_result.print_summary()

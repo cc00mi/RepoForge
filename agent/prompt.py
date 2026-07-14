@@ -57,6 +57,8 @@ def build_system_prompt(
     repo_path: str,
     tools: list[LLMToolSchema],
     repo_summary: str | None = None,
+    repo_memory_text: str = "",
+    template: str | None = None,
 ) -> str:
     """
     渲染完整的 system prompt。
@@ -65,18 +67,26 @@ def build_system_prompt(
         repo_path:    repo 根目录路径
         tools:        已注册工具的 schema 列表
         repo_summary: repo-map 生成的摘要（Day 5 接入，当前传 None）
+        repo_memory_text: RepoMemory 渲染的文本摘要，非空时注入 prompt
+        template:     自定义模板（None=使用默认 _SYSTEM_TEMPLATE）
 
     Returns:
         渲染好的 system prompt 字符串
     """
     tool_descriptions = _format_tool_descriptions(tools)
     summary = repo_summary or _NO_REPO_SUMMARY
+    tpl = template or _SYSTEM_TEMPLATE
 
-    return _SYSTEM_TEMPLATE.format(
+    prompt = tpl.format(
         repo_path=repo_path,
         repo_summary=summary,
         tool_descriptions=tool_descriptions,
     )
+
+    if repo_memory_text:
+        prompt += "\n" + repo_memory_text
+
+    return prompt
 
 
 def _format_tool_descriptions(tools: list[LLMToolSchema]) -> str:

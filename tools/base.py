@@ -151,6 +151,10 @@ class ToolRegistry:
                 error=f"Tool '{name}' raised an unexpected error: {exc}",
             )
 
+    def get_all(self) -> list[BaseTool]:
+        """返回所有已注册的工具实例。"""
+        return list(self._tools.values())
+
     def get_schemas(self) -> list[LLMToolSchema]:
         """返回所有已注册工具的 schema，供注入 LLM。"""
         return [tool.to_llm_schema() for tool in self._tools.values()]

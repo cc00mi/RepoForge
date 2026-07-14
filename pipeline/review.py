@@ -151,14 +151,38 @@ in a pull request and produce structured findings.
 
 ## Rules
 - Only READ files. Do NOT edit, write, or delete anything.
-- Analyze the DIFF carefully. Look for:
-  1. **Security** — injection, XSS, auth bypass, exposed secrets, unsafe deserialization
-  2. **Correctness** — logic errors, off-by-one, null handling, edge cases, race conditions
-  3. **Performance** — N+1 queries, unnecessary allocations, blocking I/O, missing caching
-  4. **Robustness** — missing error handling, unvalidated input, missing tests
-  5. **Style** — naming, DRY violations, overly complex functions, dead code
+- Never run git_add, git_commit, file_write, or any tool that modifies files.
+- You may use shell ONLY for read-only checks: lint, typecheck, grep.
+- Analyze the DIFF carefully. Look for issues across ALL of these dimensions:
+
+  1. **Security** — injection (SQL/XSS/command), auth bypass, exposed secrets/tokens/keys,
+     unsafe deserialization/pickling, missing access control, path traversal.
+  2. **Correctness** — logic errors, off-by-one, null/None handling, edge cases,
+     race conditions, deadlocks, broken error recovery, type mismatches.
+  3. **Performance** — N+1 queries, unnecessary allocations, blocking I/O,
+     missing caching, O(n²) where O(n) works, unbounded memory growth.
+  4. **Robustness** — missing error handling, unvalidated input, retry-ability,
+     graceful degradation on external service failure, resource cleanup.
+  5. **Test Coverage** — new/changed code has corresponding tests; edge cases
+     covered; mocks used appropriately (not mocking the system under test).
+  6. **API Breaking** — public function/class signature changes; removed or renamed
+     parameters; changed return types; removed exported symbols.
+  7. **Dependency** — new third-party dependencies are necessary (vs stdlib
+     alternative); versions are pinned/locked; no abandoned/unmaintained packages.
+  8. **Migration Safety** — DB schema changes are backwards-compatible; NOT NULL
+     columns have DEFAULT values; data backfill scripts included; rollback possible.
+  9. **i18n / a11y** — user-facing strings are localisable; UI changes preserve
+     accessibility (ARIA labels, keyboard nav, contrast ratios).
+  10. **Logging / Observability** — key paths (auth, payment, data mutation) have
+      structured logging; error paths log actionable context; metrics/traces wired.
+  11. **Style** — naming clarity, DRY violations, overly complex functions,
+      dead/unreachable code, inconsistent patterns with the rest of the codebase.
+
 - For each issue: reference the exact file path and line number.
 - Be specific. "This could be better" is not a review.
+- Focus on substance over style unless style issues are significant.
+- For dimensions 5-10, only flag issues you can actually verify from the diff —
+  do NOT fabricate concerns about migrations if no SQL files changed, etc.
 
 ## Output Format
 When you finish your review, call FINISH with a summary in this format:
@@ -183,10 +207,25 @@ OVERALL: <1-3 sentence summary of the review>
 
 If no issues found at all, write: "OVERALL: No issues found. Code looks good."
 
+## Severity Guidelines
+- CRITICAL: security vulnerability, data loss, production outage, credential leak
+- HIGH: functional bug, broken feature, API breaking change, test gap in critical path
+- MEDIUM: performance degradation, missing error handling, missing test, code smell
+- LOW: style nit, naming suggestion, minor improvement
+- SUGGESTION: optional enhancement, alternative approach worth considering
+
 ## Important
 - If the diff is empty or tiny, say so and finish quickly.
 - Do not make up issues. Only flag real problems you actually see in the code.
-- Focus on substance over style unless style issues are significant.
+- Dimensions 5-10 above are "lenses" — apply them when the diff touches those areas,
+  skip them when the PR doesn't involve the relevant concern.
+
+## Repository
+Path: {repo_path}
+{repo_summary}
+
+## Available tools
+{tool_descriptions}
 """
 
 REVIEW_TASK_TEMPLATE = """Review the following pull request.
@@ -213,8 +252,42 @@ Remember: READ ONLY. Do not edit any files."""
 
 
 # ---------------------------------------------------------------------------
-# Diff / file helpers
+# Review-specialized tool whitelist
 # ---------------------------------------------------------------------------
+
+_REVIEW_READ_ONLY_TOOLS = {
+    "file_read", "file_view", "find_files", "search_text", "find_symbol",
+    "git_diff", "git_status", "git_log",
+}
+
+# Shell is allowed ONLY for read-only checks (lint, typecheck, grep) —
+# the agent is prompted to use it sparingly and never for file mutation.
+_REVIEW_SHELL_TOOLS = {"shell"}
+
+_REVIEW_ALLOWED_TOOLS = _REVIEW_READ_ONLY_TOOLS | _REVIEW_SHELL_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# Review agent config factory
+# ---------------------------------------------------------------------------
+
+def _build_review_registry(base_registry):
+    """Return a filtered ToolRegistry containing only review-safe tools."""
+    from tools.base import ToolRegistry
+    filtered = ToolRegistry()
+    for tool in base_registry.get_all():
+        if tool.name in _REVIEW_ALLOWED_TOOLS:
+            filtered.register(tool)
+    return filtered
+
+
+REVIEW_AGENT_CONFIG = {
+    "max_steps": 15,
+    "reflection_no_edit_steps": 999,     # review never writes files → no reflection needed
+    "history_max_messages": 30,
+    "stream": True,
+}
+
 
 def get_pr_diff_github(repo_full_name: str, pr_number: int, token: str) -> str:
     """通过 GitHub API 获取 PR 的 unified diff。"""
@@ -480,6 +553,7 @@ def run_review(
     token: str | None = None,
     backend=None,
     config=None,
+    review_memory_context: str = "",  # pre-rendered ReviewMemory context for the prompt
 ) -> ReviewReport:
     """
     运行代码审查 agent。
@@ -487,6 +561,10 @@ def run_review(
     支持两种模式：
     1. GitHub PR 模式——通过 API 拉 diff
     2. 本地模式——直接对比两个分支
+
+    Args:
+        review_memory_context: 上一次 review 的摘要文本，注入 task prompt
+            供 agent 了解上次发现的 CRITICAL/HIGH 问题。
 
     Returns:
         ReviewReport 包含所有 findings
@@ -535,8 +613,14 @@ def run_review(
     else:
         raise ValueError("Either (repo_full_name, pr_number, token) or repo_dir required")
 
+    diff_text = diff_text or ""
+    diff_len = len(diff_text)
+
     # 构建任务
     diff_preview_text = diff_text[:6000] if diff_text else "(no diff available)"
+    if diff_len > 6000:
+        diff_preview_text += f"\n... ({diff_len - 6000} more chars — read chunk files for full diff)"
+
     file_list_str = "\n".join(f"  - {fn}" for fn in file_names)
     task_desc = REVIEW_TASK_TEMPLATE.format(
         title=pr_title,
@@ -545,24 +629,58 @@ def run_review(
         diff_preview=diff_preview_text,
     )
 
-    # 写 diff 到临时文件，供 agent 读取
+    # ---- Write diff chunks (supports full diff, not capped at 30k) ---------
     if repo_dir:
-        diff_path = Path(repo_dir) / ".agent_review_diff.txt"
+        diff_dir = Path(repo_dir)
     else:
-        diff_path = Path("./pipeline_repos/.agent_review_diff.txt")
-    diff_path.parent.mkdir(parents=True, exist_ok=True)
-    diff_text = diff_text or ""
-    diff_path.write_text(diff_text[:30000], encoding="utf-8")
+        diff_dir = Path("./pipeline_repos")
+    diff_dir.mkdir(parents=True, exist_ok=True)
 
-    task_desc += f"\n\nThe full diff is at `.agent_review_diff.txt` ({len(diff_text)} chars). Read this file first."
+    CHUNK_SIZE = 15_000
+    chunk_paths: list[str] = []
+    for i in range(0, max(diff_len, 1), CHUNK_SIZE):
+        chunk = diff_text[i:i + CHUNK_SIZE]
+        if not chunk:
+            break
+        path = diff_dir / f".agent_review_diff_{len(chunk_paths) + 1}.txt"
+        path.write_text(chunk, encoding="utf-8")
+        chunk_paths.append(str(path))
 
-    registry = _build_registry(config)
-    # Review 需要足够步数读完文件并输出 findings
-    review_max_steps = max(25, min(config.agent.max_steps, 35))
+    if len(chunk_paths) == 1:
+        task_desc += (
+            f"\n\nThe full diff is at `.agent_review_diff_1.txt` "
+            f"({diff_len} chars). Read this file first."
+        )
+    elif chunk_paths:
+        task_desc += (
+            f"\n\nThe diff is split into {len(chunk_paths)} chunk files "
+            f"(total {diff_len} chars): "
+            + ", ".join(f"`.agent_review_diff_{i + 1}.txt`"
+                        for i in range(len(chunk_paths)))
+            + ". Read all chunks for complete coverage."
+        )
+
+    # ---- Inject ReviewMemory context ---------------------------------------
+    if review_memory_context:
+        task_desc += (
+            f"\n\n## Previous Review Context\n"
+            f"{review_memory_context}\n\n"
+            f"Check whether the CRITICAL and HIGH issues from the previous "
+            f"review have been addressed in this revision."
+        )
+
+    # ---- Build filtered review registry ------------------------------------
+    base_registry = _build_registry(config)
+    registry = _build_review_registry(base_registry)
+
+    # ---- Run agent ---------------------------------------------------------
     agent_cfg = AgentConfig(
-        max_steps=review_max_steps,
+        max_steps=REVIEW_AGENT_CONFIG["max_steps"],
         budget_tokens=config.agent.budget_tokens,
-        stream=True,
+        stream=REVIEW_AGENT_CONFIG["stream"],
+        system_prompt_template=REVIEW_SYSTEM_PROMPT,
+        reflection_no_edit_steps=REVIEW_AGENT_CONFIG["reflection_no_edit_steps"],
+        history_max_messages=REVIEW_AGENT_CONFIG["history_max_messages"],
     )
     agent = Agent(backend, registry, agent_cfg)
 
@@ -589,13 +707,89 @@ def run_review(
     report.stats["steps_taken"] = result.steps_taken
     report.stats["tokens_used"] = result.total_tokens
 
-    # 清理临时文件
-    try:
-        diff_path.unlink()
-    except Exception:
-        pass
+    # 清理临时 chunk 文件
+    for cp in chunk_paths:
+        try:
+            Path(cp).unlink()
+        except Exception:
+            pass
 
     return report
+
+
+# ---------------------------------------------------------------------------
+# GitHub Review API
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# PR Classifier (heuristic, no LLM needed)
+# ---------------------------------------------------------------------------
+
+def classify_pr(diff: str, pr_title: str = "", report: ReviewReport | None = None) -> dict:
+    """Lightweight PR classification based on diff size, risk, and title keywords.
+
+    Returns a dict with keys: size, risk, type, estimated_review_minutes
+    """
+    return {
+        "size": _classify_size(diff),
+        "risk": _classify_risk(report) if report else "unknown",
+        "type": _classify_type(pr_title),
+        "estimated_review_minutes": _estimate_review_time(diff),
+    }
+
+
+def _classify_size(diff: str) -> str:
+    lines = diff.count("\n")
+    if lines < 50:
+        return "XS"
+    if lines < 200:
+        return "S"
+    if lines < 800:
+        return "M"
+    if lines < 2000:
+        return "L"
+    return "XL"
+
+
+def _classify_risk(report: ReviewReport | None) -> str:
+    if report is None:
+        return "unknown"
+    if report.critical_count > 0:
+        return "critical"
+    if report.high_count > 0:
+        return "high"
+    if report.total_count > 5:
+        return "medium"
+    return "low"
+
+
+def _classify_type(pr_title: str) -> str:
+    """Infer PR type from title keywords. Specific types checked before generic ones."""
+    t = pr_title.lower()
+    if any(kw in t for kw in ["doc", "readme", "typo", "spelling", "comment"]):
+        return "docs"
+    if any(kw in t for kw in ["depend", "bump", "upgrade", "update dep", "pin"]):
+        return "dependency"
+    if any(kw in t for kw in ["test", "coverage", "fixture"]):
+        return "test"
+    if any(kw in t for kw in ["ci", "github action", "workflow", "deploy", "release"]):
+        return "ci/cd"
+    if any(kw in t for kw in ["perf", "performance", "speed", "fast", "optimize", "cache"]):
+        return "performance"
+    if any(kw in t for kw in ["fix", "bug", "patch", "hotfix", "resolve", "address"]):
+        return "bugfix"
+    if any(kw in t for kw in ["refactor", "restructure", "clean", "simplify", "reorganize"]):
+        return "refactor"
+    if any(kw in t for kw in ["feat", "add", "implement", "support", "introduce"]):
+        return "feature"
+    return "other"
+
+
+def _estimate_review_time(diff: str) -> int:
+    """Estimate review time in minutes based on diff size."""
+    lines = diff.count("\n")
+    return max(1, lines // 100)
 
 
 # ---------------------------------------------------------------------------

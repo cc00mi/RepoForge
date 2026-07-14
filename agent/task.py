@@ -218,6 +218,7 @@ class RunResult:
     total_tokens: int = 0
     patch: str | None = None            # git diff 格式的修改内容
     error: str | None = None            # status == FAILED 时的原因
+    changed_files: list[str] = field(default_factory=list)
 
     def is_success(self) -> bool:
         return self.status == RunStatus.SUCCESS

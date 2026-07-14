@@ -53,18 +53,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _build_routes(auth, config):
-    """构建事件类型 → handler 映射。"""
-    from pipeline.handlers import (
-        handle_check_run_failed,
-        handle_issues_opened,
-        handle_pull_request_opened,
-    )
-
-    return {
-        "issues": handle_issues_opened,
-        "pull_request": handle_pull_request_opened,
-        "check_run": handle_check_run_failed,
-    }
+    """构建事件路由表（使用 EventRouter）。"""
+    from pipeline.event_registry import build_default_router
+    return build_default_router()
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +76,13 @@ def _extract_event_info(event_type: str, payload: dict) -> str:
         repo = payload.get("repository", {}).get("full_name", "?")
         return f"PR #{number} {action} ({repo})"
 
+    if event_type == "pull_request_review":
+        action = payload.get("action", "?")
+        pr_number = payload.get("pull_request", {}).get("number", "?")
+        state = payload.get("review", {}).get("state", "?")
+        repo = payload.get("repository", {}).get("full_name", "?")
+        return f"PR review #{pr_number} {action} ({state}) ({repo})"
+
     if event_type == "check_run":
         action = payload.get("action", "?")
         name = payload.get("check_run", {}).get("name", "?")
@@ -97,10 +95,17 @@ def _extract_event_info(event_type: str, payload: dict) -> str:
 def _action_matches(event_type: str, action: str) -> bool:
     """判断事件 + action 组合是否需要处理。"""
     wanted = {
-        "issues": {"opened"},
-        "pull_request": {"opened", "synchronize"},
-        "check_run": {"completed"},  # completed 且 conclusion=failure 才处理
+        "issues": {"opened", "labeled", "closed"},
+        "issue_comment": {"created"},
+        "pull_request": {"opened", "synchronize", "closed", "labeled"},
+        "pull_request_review": {"submitted"},
+        "check_run": {"completed"},
+        "push": {"*"},           # tag push = any action (ref check in handler)
+        "dependabot_alert": {"created"},
+        "installation": {"created"},
     }
+    if event_type == "push":
+        return True  # handle_push_tag checks ref internally
     return action in wanted.get(event_type, set())
 
 
@@ -128,7 +133,6 @@ def create_app(auth, config, webhook_secret: str = ""):
     """
     app = Flask(__name__)
 
-    # 关闭 Flask 默认日志（用 logging 模块统一处理）
     import logging as _logging
     flask_log = _logging.getLogger("werkzeug")
     flask_log.setLevel(_logging.WARNING)
@@ -170,7 +174,7 @@ def create_app(auth, config, webhook_secret: str = ""):
         return {
             "status": "ok",
             "model": f"{config.llm.provider}/{config.llm.model}",
-            "handlers": list(routes.keys()),
+            "handlers": list({r["event"] for r in routes.list_routes()}),
         }
 
     @app.route("/webhook", methods=["POST"])
@@ -194,6 +198,16 @@ def create_app(auth, config, webhook_secret: str = ""):
 
         logger.info("[%s] %s", delivery_id[:8], event_info)
 
+        # 记录 TTR 接收时间
+        try:
+            from pipeline.metrics import TTRTracker
+            _repo = payload.get("repository", {}).get("full_name", "")
+            _num = (payload.get("issue", {}) or payload.get("pull_request", {}) or {}).get("number", 0)
+            if _repo and _num:
+                TTRTracker.record_receipt(_repo, _num, event_type)
+        except Exception:
+            pass
+
         # 过滤不关心的事件类型
         if event_type not in routes:
             logger.debug("No handler for event type: %s", event_type)
@@ -210,7 +224,7 @@ def create_app(auth, config, webhook_secret: str = ""):
                 status=200, mimetype="application/json",
             )
 
-        # check_run 特殊处理：只处理 failure
+        # check_run 特殊处理
         if event_type == "check_run" and not _check_run_is_failure(payload):
             conclusion = payload.get("check_run", {}).get("conclusion", "?")
             logger.debug("Check run completed with conclusion=%s, ignored", conclusion)
@@ -221,7 +235,13 @@ def create_app(auth, config, webhook_secret: str = ""):
 
         # 路由到 handler
         try:
-            handler = routes[event_type]
+            handler = routes.resolve(event_type, action)
+            if handler is None:
+                logger.debug("No handler for %s / %s", event_type, action)
+                return Response(
+                    json.dumps({"status": "ignored", "reason": f"no handler for {event_type}/{action}"}),
+                    status=200, mimetype="application/json",
+                )
             result = handler(payload, auth, config)
             logger.info("[%s] Handler result: %s", delivery_id[:8], result)
             return Response(
@@ -235,7 +255,6 @@ def create_app(auth, config, webhook_secret: str = ""):
                 status=500, mimetype="application/json",
             )
 
-    # 注册 Dashboard
     from pipeline.dashboard import register_dashboard
     register_dashboard(app, config)
 
@@ -245,7 +264,7 @@ def create_app(auth, config, webhook_secret: str = ""):
         return {
             "model": f"{config.llm.provider}/{config.llm.model}",
             "max_steps": config.agent.max_steps,
-            "handlers": list(routes.keys()),
+            "handlers": list({r["event"] for r in routes.list_routes()}),
         }
 
     return app

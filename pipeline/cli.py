@@ -115,6 +115,20 @@ def serve(
     # 创建 Flask app
     app = create_app(auth, config, webhook_secret=_secret)
 
+    # 启动后台调度器
+    _scheduler = None
+    if config.scheduler.enabled:
+        from pipeline.scheduler import start_scheduler
+        repos = config.scheduler.monitored_repos
+        inst_id = config.scheduler.installation_id
+        if repos and inst_id:
+            _scheduler = start_scheduler(auth, config, repos, inst_id)
+            click.echo(f"  Scheduler:   enabled (scout={config.scheduler.scout_interval_hours}h, "
+                       f"stale={config.scheduler.stale_interval_hours}h, "
+                       f"security={config.scheduler.security_interval_hours}h)")
+        else:
+            click.echo("  Scheduler:   disabled (missing repos or installation_id)")
+
     click.echo()
     click.echo("=" * 55)
     click.echo("  Repoforge — Webhook Server")
@@ -130,7 +144,12 @@ def serve(
     click.echo()
     click.echo("等待 GitHub 事件...")
 
-    app.run(host=host, port=port, debug=debug)
+    try:
+        app.run(host=host, port=port, debug=debug)
+    finally:
+        if _scheduler is not None:
+            from pipeline.scheduler import stop_scheduler
+            stop_scheduler()
 
 
 @main.command()

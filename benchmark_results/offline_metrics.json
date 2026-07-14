@@ -1,0 +1,22 @@
+{
+  "triage_accuracy": 0.8823529411764706,
+  "triage_priority_accuracy": 0.9411764705882353,
+  "triage_effort_accuracy": 0.8823529411764706,
+  "triage_samples": 17,
+  "dedup_precision": 1.0,
+  "dedup_recall": 1.0,
+  "dedup_f1": 1.0,
+  "dedup_samples": 9,
+  "repo_memory_hit_rate": 0.25,
+  "review_coverage": 0.6,
+  "finding_recall": 0.2,
+  "finding_precision": 0.2,
+  "finding_f1": 0.2,
+  "stale_reduction_pct": 41.7,
+  "ttr_median_seconds": 180.0,
+  "ttr_below_5min_pct": 80.0,
+  "total_py_files": 6770,
+  "total_lines": 2039770,
+  "test_count": 28854,
+  "test_suite_time_seconds": 52.070093631744385
+}

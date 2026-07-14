@@ -250,6 +250,54 @@ def collect_dashboard_data(config) -> DashboardData:
     )
 
 
+def collect_metrics_data() -> dict:
+    """Collect all metrics from the metrics store.
+
+    Returns aggregated data for coverage, recall, stale reduction, and TTR.
+    """
+    result: dict = {
+        "coverage": {"status": "not_computed", "repos": []},
+        "recall": {"status": "no_data", "paired_prs": 0},
+        "stale": {"status": "no_data", "repos": []},
+        "ttr": {"status": "no_data"},
+    }
+
+    try:
+        from pipeline.metrics import (
+            TTRTracker, StaleMetricsLogger, FindingStore,
+        )
+        result["ttr"] = TTRTracker.compute_stats(window_hours=168)  # 7 days
+        result["recall"] = FindingStore.aggregate_recall()
+        result["stale"] = {"repos": []}
+
+        # Stale: try to get reduction for repos that have scan logs
+        try:
+            from pipeline.metrics import _metrics_dir, _read_jsonl
+            d = _metrics_dir()
+            scans = _read_jsonl(d / "stale_scans.jsonl") if (d / "stale_scans.jsonl").exists() else []
+            repos_with_scans = sorted({s.get("repo_full_name", "") for s in scans if s.get("repo_full_name")})
+            for repo in repos_with_scans:
+                red = StaleMetricsLogger.compute_reduction(repo)
+                if red:
+                    result["stale"]["repos"].append({
+                        "repo": repo,
+                        "first_scan_stale": red.first_scan_stale,
+                        "latest_scan_stale": red.latest_scan_stale,
+                        "absolute_reduction": red.absolute_reduction,
+                        "reduction_pct": red.reduction_pct,
+                        "total_scans": red.total_scans,
+                        "scan_period_days": red.scan_period_days,
+                    })
+            result["stale"]["status"] = "ok" if result["stale"]["repos"] else "no_data"
+        except Exception:
+            result["stale"]["status"] = "error"
+
+    except Exception:
+        logger.debug("Failed to collect metrics data", exc_info=True)
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -257,7 +305,6 @@ def collect_dashboard_data(config) -> DashboardData:
 @_dashboard_bp.route("/")
 def index():
     """Dashboard 主页。"""
-    # config 和 data 在注册 blueprint 时注入
     config = _dashboard_bp.config_ref
     data = collect_dashboard_data(config)
     return render_template_string(_DASHBOARD_HTML, data=data)
@@ -291,6 +338,44 @@ def api_stats():
         ],
         "benchmark": data.benchmark_summary,
     }
+
+
+# ---------------------------------------------------------------------------
+# Metrics API routes
+# ---------------------------------------------------------------------------
+
+@_dashboard_bp.route("/api/metrics")
+def api_metrics():
+    """Return all metrics groups (coverage, recall, stale, TTR)."""
+    return collect_metrics_data()
+
+
+@_dashboard_bp.route("/api/metrics/coverage")
+def api_metrics_coverage():
+    """PR review coverage detail."""
+    data = collect_metrics_data()
+    return data.get("coverage", {})
+
+
+@_dashboard_bp.route("/api/metrics/recall")
+def api_metrics_recall():
+    """Review finding recall stats."""
+    data = collect_metrics_data()
+    return data.get("recall", {})
+
+
+@_dashboard_bp.route("/api/metrics/stale")
+def api_metrics_stale():
+    """Stale PR reduction stats."""
+    data = collect_metrics_data()
+    return data.get("stale", {})
+
+
+@_dashboard_bp.route("/api/metrics/ttr")
+def api_metrics_ttr():
+    """Time to first response stats."""
+    data = collect_metrics_data()
+    return data.get("ttr", {})
 
 
 def register_dashboard(app, config):
